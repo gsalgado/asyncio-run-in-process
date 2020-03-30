@@ -51,6 +51,7 @@ async def test_open_proc_SIGINT_can_be_handled():
             while True:
                 await asyncio.sleep(0)
         except KeyboardInterrupt:
+            await asyncio.sleep(0.001)
             return 9999
 
     async with open_in_process(do_sleep_forever) as proc:
@@ -71,7 +72,7 @@ async def test_open_proc_SIGINT_can_be_ignored():
 
         try:
             while True:
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.001)
         except KeyboardInterrupt:
             return 9999
 
@@ -123,7 +124,7 @@ async def test_open_proc_unpickleable_params(touch_path):
 async def test_open_proc_outer_KeyboardInterrupt():
     async def do_sleep_forever():
         while True:
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.0001)
 
     with pytest.raises(KeyboardInterrupt):
         async with open_in_process(do_sleep_forever) as proc:

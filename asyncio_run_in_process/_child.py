@@ -217,6 +217,7 @@ def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
         except SystemExit as err:
             code = err.args[0]
         except BaseException:
+            logger.exception("")
             code = 1
         else:
             finished_payload = pickle_value(result)
