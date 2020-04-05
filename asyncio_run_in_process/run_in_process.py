@@ -265,7 +265,7 @@ async def _open_in_process(
                 # If a keyboard interrupt is encountered relay it to the
                 # child process and then give it a moment to cleanup before
                 # re-raising
-                logger.debug("Relaying SIGINT to pid=%d", sub_proc.pid)
+                logger.info("Relaying SIGINT to pid=%d", sub_proc.pid)
                 try:
                     proc.send_signal(signal.SIGINT)
                     try:
@@ -281,7 +281,7 @@ async def _open_in_process(
                 # If this is due to an `asyncio` cancellation we send along a
                 # SIGTERM to signal the need for more immediate cleanup, giving
                 # the child process a moment to finish before re-raising.
-                logger.debug(
+                logger.info(
                     "Got CancelledError while running subprocess pid=%d.  Sending SIGTERM.",
                     sub_proc.pid,
                 )
@@ -290,7 +290,7 @@ async def _open_in_process(
                     try:
                         await asyncio.wait_for(proc.wait(), timeout=SIGTERM_TIMEOUT_SECONDS)
                     except asyncio.TimeoutError:
-                        logger.debug(
+                        logger.info(
                             "Timed out waiting for pid=%d to exit after SIGTERM",
                             sub_proc.pid,
                         )

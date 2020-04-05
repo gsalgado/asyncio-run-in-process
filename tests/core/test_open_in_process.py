@@ -46,6 +46,7 @@ async def test_open_proc_SIGINT_while_running():
 
 @pytest.mark.asyncio
 async def test_open_proc_SIGINT_can_be_handled():
+
     async def do_sleep_forever():
         try:
             while True:

@@ -26,8 +26,6 @@ from .typing import (
     TReturn,
 )
 
-logger = logging.getLogger("asyncio_run_in_process")
-
 
 def update_state(to_parent: BinaryIO, state: State) -> None:
     to_parent.write(state.value.to_bytes(1, 'big'))
@@ -81,6 +79,7 @@ async def _handle_coro(coro: Coroutine[Any, Any, TReturn], got_SIGINT: asyncio.E
     # wrapping the coroutine in `asyncio.shield` we side-step this by
     # preventing the cancellation to actually penetrate the coroutine, allowing
     # us to await the `coro_task` without causing the `RuntimeError`.
+    logger = logging.getLogger("asyncio_run_in_process")
     coro_task = asyncio.ensure_future(asyncio.shield(coro))
     async with cleanup_tasks(coro_task):
         while True:
@@ -88,15 +87,20 @@ async def _handle_coro(coro: Coroutine[Any, Any, TReturn], got_SIGINT: asyncio.E
             # This is done in a loop because the function *could* choose to ignore
             # the `KeyboardInterrupt` and continue processing, in which case we
             # reset the signal and resume waiting.
+            logger.warning("Waiting for %s", coro_task)
             done, pending = await asyncio.wait(
                 (coro_task, got_SIGINT.wait()),
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
             if coro_task.done():
+                logger.warning("coro_task is done")
+                logger.warning("done: %s", done)
+                logger.warning("pending: %s", pending)
                 async with cleanup_tasks(*done, *pending):
                     return await coro_task
             elif got_SIGINT.is_set():
+                logger.warning("%s got SIGINT", coro)
                 got_SIGINT.clear()
 
                 # In the event that a SIGINT was recieve we need to inject a
@@ -110,7 +114,10 @@ async def _handle_coro(coro: Coroutine[Any, Any, TReturn], got_SIGINT: asyncio.E
                     async with cleanup_tasks(*done, *pending):
                         return cast(TReturn, err.value)
                 except BaseException as err:
+                    logger.exception("exception from throw() to %s", coro)
                     raise
+                else:
+                    logger.warning("No exception from throw() to %s", coro)
             else:
                 raise Exception("Code path should not be reachable")
 
@@ -183,6 +190,7 @@ def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
     process over the given file descriptor, runs the coroutine, handles error
     cases, and transmits the result back to the parent process.
     """
+    logger = logging.getLogger("asyncio_run_in_process")
     # state: INITIALIZING (default initial state)
     with os.fdopen(fd_write, "wb") as to_parent:
         # state: INITIALIZED
@@ -217,7 +225,7 @@ def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
         except SystemExit as err:
             code = err.args[0]
         except BaseException:
-            logger.exception("")
+            logger.exception("Exception in _run_process()")
             code = 1
         else:
             finished_payload = pickle_value(result)
