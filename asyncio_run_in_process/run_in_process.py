@@ -208,6 +208,27 @@ def _update_subprocess_kwargs(subprocess_kwargs: Optional['SubprocessKwargs'],
     return updated_kwargs
 
 
+async def _ensure_termination(proc: Process[TReturn]) -> None:
+    # When we send a SIGINT to our sub process, that is detected by _handle_coro(), which then
+    # injects a KeyboardInterrupt in the running coroutine using coro.throw(), but there's
+    # something we don't quite understand with that method which causes the coroutine to hang
+    # forever if it catches the KeyboardInterrupt and makes async calls
+    # (https://bugs.python.org/issue40152), so to ensure they get unstuck we send an extra SIGINT
+    # before resorting to a SIGTERM
+    logger.debug("Sending SIGINT to pid=%d", proc.pid)
+    proc.send_signal(signal.SIGINT)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=constants.SIGINT_TIMEOUT_SECONDS / 2)
+    except asyncio.TimeoutError:
+        logger.info(
+            "Timed out waiting for pid=%d to exit after SIGINT, sending SIGTERM", proc.pid)
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=constants.SIGTERM_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            logger.info("Timed out waiting for pid=%d to exit after SIGTERM", proc.pid)
+
+
 # mypy recognizes this decorator as being untyped.
 @asynccontextmanager  # type: ignore
 async def _open_in_process(
@@ -291,20 +312,18 @@ async def _open_in_process(
                 try:
                     proc.send_signal(signal.SIGINT)
                     try:
+                        # Notice that we wait only half of the timeout here because
+                        # _ensure_termination() will send another SIGINT and wait a bit more
+                        # before sending the SIGTERM.
                         await asyncio.wait_for(
-                            proc.wait(), timeout=constants.SIGINT_TIMEOUT_SECONDS)
+                            proc.wait(), timeout=constants.SIGINT_TIMEOUT_SECONDS / 2)
+                    except asyncio.CancelledError:
+                        # We need to catch asyncio.CancelledError here because of
+                        # https://github.com/ethereum/trinity/issues/1661.
+                        logger.exception("This should only happen when running trinity tests")
+                        await _ensure_termination(proc)
                     except asyncio.TimeoutError:
-                        logger.debug(
-                            "Timed out waiting for pid=%d to exit after SIGINT, sending SIGTERM",
-                            sub_proc.pid,
-                        )
-                        proc.terminate()
-                        try:
-                            await asyncio.wait_for(
-                                proc.wait(), timeout=constants.SIGTERM_TIMEOUT_SECONDS)
-                        except asyncio.TimeoutError:
-                            logger.debug(
-                                "Timed out waiting for pid=%d to exit after SIGTERM", sub_proc.pid)
+                        await _ensure_termination(proc)
                 except BaseException as e:
                     logger.exception(
                         "Unexpected error when terminating child; pid=%d", sub_proc.pid)
