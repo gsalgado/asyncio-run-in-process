@@ -29,8 +29,6 @@ from .typing import (
     TReturn,
 )
 
-logger = logging.getLogger("asyncio_run_in_process")
-
 
 def update_state(to_parent: BinaryIO, state: State) -> None:
     to_parent.write(state.value.to_bytes(1, 'big'))

@@ -58,7 +58,7 @@ async def _monitor_sub_proc(
     await proc.wait_pid()
     if proc.pid != sub_proc.pid:
         raise Exception("Process id mismatch.  This should not be possible")
-    logger.debug("subprocess for %s started.  pid=%d", proc, sub_proc.pid)
+    logger.info("subprocess for %s started.  pid=%d", proc, sub_proc.pid)
 
     # we write the execution data immediately without waiting for the
     # `WAIT_EXEC_DATA` state to ensure that the child process doesn't have
@@ -79,7 +79,7 @@ async def _monitor_sub_proc(
     await sub_proc.wait()
 
     proc.returncode = sub_proc.returncode
-    logger.debug("process %s (pid=%d) finished: returncode=%d", proc, sub_proc.pid, proc.returncode)
+    logger.info("process %s (pid=%d) finished: returncode=%d", proc, sub_proc.pid, proc.returncode)
 
 
 async def _relay_signals(
@@ -98,7 +98,7 @@ async def _relay_signals(
     while True:
         signum = await queue.get()
 
-        logger.debug("relaying signal %s to child process %s", signum, proc)
+        logger.info("relaying signal %s to child process %s", signum, proc)
         proc.send_signal(signum)
 
 
@@ -141,7 +141,7 @@ async def _monitor_state(
                 proc.pid = int.from_bytes(pid_bytes, 'big')
 
             await proc.update_state(child_state)
-            logger.debug(
+            logger.info(
                 "Updated process %s state %s -> %s",
                 proc,
                 expected_state.name,
@@ -163,7 +163,7 @@ async def _monitor_state(
         proc.error = result
 
     await proc.update_state(child_state)
-    logger.debug(
+    logger.info(
         "Updated process %s state %s -> %s",
         proc,
         expected_state.name,
@@ -264,18 +264,18 @@ async def _open_in_process(
                 # If a keyboard interrupt is encountered relay it to the
                 # child process and then give it a moment to cleanup before
                 # re-raising
-                logger.debug("Relaying SIGINT to pid=%d", sub_proc.pid)
+                logger.info("Relaying SIGINT to pid=%d", sub_proc.pid)
                 try:
                     proc.send_signal(signal.SIGINT)
                     try:
                         await asyncio.wait_for(
                             proc.wait(), timeout=constants.SIGINT_TIMEOUT_SECONDS)
                     except asyncio.TimeoutError:
-                        logger.debug(
+                        logger.info(
                             "Timed out waiting for pid=%d to exit after relaying SIGINT",
                             sub_proc.pid,
                         )
-                except BaseException as e:
+                except BaseException:
                     logger.exception(
                         "Unexpected error when terminating child; pid=%d", sub_proc.pid)
                 finally:
@@ -284,7 +284,7 @@ async def _open_in_process(
                 # Send the child a SIGINT and wait SIGINT_TIMEOUT_SECONDS for it to terminate. If
                 # that times out, send a SIGTERM and wait SIGTERM_TIMEOUT_SECONDS before
                 # re-raising.
-                logger.debug(
+                logger.info(
                     "Got CancelledError while running subprocess pid=%d.  Sending SIGINT.",
                     sub_proc.pid,
                 )
@@ -294,7 +294,7 @@ async def _open_in_process(
                         await asyncio.wait_for(
                             proc.wait(), timeout=constants.SIGINT_TIMEOUT_SECONDS)
                     except asyncio.TimeoutError:
-                        logger.debug(
+                        logger.info(
                             "Timed out waiting for pid=%d to exit after SIGINT, sending SIGTERM",
                             sub_proc.pid,
                         )
@@ -303,9 +303,9 @@ async def _open_in_process(
                             await asyncio.wait_for(
                                 proc.wait(), timeout=constants.SIGTERM_TIMEOUT_SECONDS)
                         except asyncio.TimeoutError:
-                            logger.debug(
+                            logger.info(
                                 "Timed out waiting for pid=%d to exit after SIGTERM", sub_proc.pid)
-                except BaseException as e:
+                except BaseException:
                     logger.exception(
                         "Unexpected error when terminating child; pid=%d", sub_proc.pid)
                 finally:
