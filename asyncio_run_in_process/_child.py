@@ -24,29 +24,15 @@ from .exceptions import (
 )
 from .state import (
     State,
+    update_state,
+    update_state_finished,
+    update_state_initialized,
 )
 from .typing import (
     TReturn,
 )
 
 logger = logging.getLogger("asyncio_run_in_process")
-
-
-def update_state(to_parent: BinaryIO, state: State) -> None:
-    to_parent.write(state.value.to_bytes(1, 'big'))
-    to_parent.flush()
-
-
-def update_state_initialized(to_parent: BinaryIO) -> None:
-    payload = State.INITIALIZED.value.to_bytes(1, 'big') + os.getpid().to_bytes(4, 'big')
-    to_parent.write(payload)
-    to_parent.flush()
-
-
-def update_state_finished(to_parent: BinaryIO, finished_payload: bytes) -> None:
-    payload = State.FINISHED.value.to_bytes(1, 'big') + finished_payload
-    to_parent.write(payload)
-    to_parent.flush()
 
 
 SHUTDOWN_SIGNALS = {signal.SIGTERM}
