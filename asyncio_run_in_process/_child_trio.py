@@ -1,7 +1,4 @@
-import argparse
-import os
 import signal
-import sys
 from typing import (
     Any,
     AsyncIterator,
@@ -16,44 +13,18 @@ import trio_typing
 
 from ._utils import (
     pickle_value,
-    receive_pickled_value,
+)
+from .abc import (
+    TAsyncFn,
 )
 from .state import (
     State,
     update_state,
     update_state_finished,
-    update_state_initialized,
 )
 from .typing import (
     TReturn,
 )
-
-#
-# CLI invocation for subprocesses
-#
-parser = argparse.ArgumentParser(description="trio-run-in-process")
-parser.add_argument(
-    "--parent-pid", type=int, required=True, help="The PID of the parent process"
-)
-parser.add_argument(
-    "--fd-read",
-    type=int,
-    required=True,
-    help=(
-        "The file descriptor that the child process can use to read data that "
-        "has been written by the parent process"
-    ),
-)
-parser.add_argument(
-    "--fd-write",
-    type=int,
-    required=True,
-    help=(
-        "The file descriptor that the child process can use for writing data "
-        "meant to be read by the parent process"
-    ),
-)
-
 
 SHUTDOWN_SIGNALS = {signal.SIGTERM}
 
@@ -81,55 +52,31 @@ async def _do_async_fn(
 
             result = await async_fn(*args)
 
-            # state: STOPPING
-            update_state(to_parent, State.STOPPING)
-
             nursery.cancel_scope.cancel()
         return result
 
 
-def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
-    """
-    Run the child process
-    """
-    # state: INITIALIZING
-    with os.fdopen(fd_write, "wb", closefd=True) as to_parent:
-        # state: INITIALIZED
-        update_state_initialized(to_parent)
-        with os.fdopen(fd_read, "rb", closefd=True) as from_parent:
-            # state: WAIT_EXEC_DATA
-            update_state(to_parent, State.WAIT_EXEC_DATA)
-            async_fn, args = receive_pickled_value(from_parent)
-
-        # state: BOOTING
-        update_state(to_parent, State.BOOTING)
-
-        try:
-            try:
-                result = trio.run(_do_async_fn, async_fn, args, to_parent)
-            except BaseException as err:
-                # state: STOPPING
-                update_state(to_parent, State.STOPPING)
-                finished_payload = pickle_value(err)
-                raise
-        except KeyboardInterrupt:
-            code = 2
-        except SystemExit as err:
-            code = err.args[0]
-        except BaseException:
-            code = 1
-        else:
-            # state: STOPPING (set from within _do_async_fn)
-            finished_payload = pickle_value(result)
-            code = 0
-        finally:
-            # state: FINISHED
-            update_state_finished(to_parent, finished_payload)
-            sys.exit(code)
+def _run_on_trio(async_fn: TAsyncFn, args: Sequence[Any], to_parent: BinaryIO) -> None:
+    try:
+        result = trio.run(_do_async_fn, async_fn, args, to_parent)
+    except BaseException as err:
+        finished_payload = pickle_value(err)
+        raise
+    else:
+        finished_payload = pickle_value(result)
+    finally:
+        # XXX: The STOPPING state seems useless as nothing happens between that and the FINISHED
+        # state.
+        update_state(to_parent, State.STOPPING)
+        update_state_finished(to_parent, finished_payload)
 
 
 if __name__ == "__main__":
+    from asyncio_run_in_process._child import parser, run_process
     args = parser.parse_args()
-    _run_process(
-        parent_pid=args.parent_pid, fd_read=args.fd_read, fd_write=args.fd_write
+    run_process(
+        runner=_run_on_trio,
+        parent_pid=args.parent_pid,
+        fd_read=args.fd_read,
+        fd_write=args.fd_write,
     )

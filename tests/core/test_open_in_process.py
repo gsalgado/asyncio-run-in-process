@@ -14,14 +14,19 @@ from asyncio_run_in_process import (
 from asyncio_run_in_process.exceptions import (
     ChildCancelled,
 )
+from asyncio_run_in_process.tools.sleep import (
+    sleep,
+)
 
 
 @pytest.fixture(params=('use_trio', 'use_asyncio'))
-def open_in_proc_and_sleep_fn(request):
+def open_in_proc(request):
     if request.param == 'use_trio':
-        return open_in_process_with_trio, trio.sleep
+        return open_in_process_with_trio
+    elif request.param == 'use_asyncio':
+        return open_in_process
     else:
-        return open_in_process, asyncio.sleep
+        raise Exception("Invariant")
 
 
 @pytest.mark.asyncio
@@ -52,12 +57,10 @@ async def test_SIGINT_on_method_using_run_in_executor():
 
 
 @pytest.mark.asyncio
-async def test_open_in_proc_SIGTERM_while_running(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_in_proc_SIGTERM_while_running(open_in_proc):
     async def do_sleep_forever():
         while True:
-            await sleep_fn(0)
+            await sleep(0)
 
     async with open_in_proc(do_sleep_forever) as proc:
         proc.terminate()
@@ -65,12 +68,10 @@ async def test_open_in_proc_SIGTERM_while_running(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_in_proc_SIGKILL_while_running(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_in_proc_SIGKILL_while_running(open_in_proc):
     async def do_sleep_forever():
         while True:
-            await sleep_fn(0)
+            await sleep(0)
 
     async with open_in_proc(do_sleep_forever) as proc:
         await proc.kill()
@@ -79,12 +80,10 @@ async def test_open_in_proc_SIGKILL_while_running(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_SIGINT_while_running(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_proc_SIGINT_while_running(open_in_proc):
     async def do_sleep_forever():
         while True:
-            await sleep_fn(0)
+            await sleep(0)
 
     async with open_in_proc(do_sleep_forever) as proc:
         proc.send_signal(signal.SIGINT)
@@ -92,13 +91,11 @@ async def test_open_proc_SIGINT_while_running(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_SIGINT_can_be_handled(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_proc_SIGINT_can_be_handled(open_in_proc):
     async def do_sleep_forever():
         try:
             while True:
-                await sleep_fn(0)
+                await sleep(0)
         except KeyboardInterrupt:
             return 9999
 
@@ -109,20 +106,18 @@ async def test_open_proc_SIGINT_can_be_handled(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_SIGINT_can_be_ignored(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_proc_SIGINT_can_be_ignored(open_in_proc):
     async def do_sleep_forever():
         try:
             while True:
-                await sleep_fn(0)
+                await sleep(0)
         except KeyboardInterrupt:
             # silence the first SIGINT
             pass
 
         try:
             while True:
-                await sleep_fn(0)
+                await sleep(0)
         except KeyboardInterrupt:
             return 9999
 
@@ -136,9 +131,7 @@ async def test_open_proc_SIGINT_can_be_ignored(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_invalid_function_call(open_in_proc_and_sleep_fn):
-    open_in_proc, _ = open_in_proc_and_sleep_fn
-
+async def test_open_proc_invalid_function_call(open_in_proc):
     async def takes_no_args():
         pass
 
@@ -149,9 +142,7 @@ async def test_open_proc_invalid_function_call(open_in_proc_and_sleep_fn):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_unpickleable_params(touch_path, open_in_proc_and_sleep_fn):
-    open_in_proc, _ = open_in_proc_and_sleep_fn
-
+async def test_open_proc_unpickleable_params(touch_path, open_in_proc):
     async def takes_open_file(f):
         pass
 
@@ -174,15 +165,15 @@ async def test_open_proc_KeyboardInterrupt_while_running():
     assert proc.returncode == 2
 
 
-# XXX: For some reason this test hangs forever if we use the open_in_proc_and_sleep_fn fixture, so
+# XXX: For some reason this test hangs forever if we use the open_in_proc fixture, so
 # we have to have duplicate versions of it for trio/asyncio.
 @pytest.mark.asyncio
 async def test_open_proc_with_trio_KeyboardInterrupt_while_running():
-    sleep_fn = trio.sleep
+    sleep = trio.sleep
 
     async def do_sleep_forever():
         while True:
-            await sleep_fn(0)
+            await sleep(0)
 
     with pytest.raises(KeyboardInterrupt):
         async with open_in_process_with_trio(do_sleep_forever) as proc:
@@ -195,12 +186,10 @@ class CustomException(BaseException):
 
 
 @pytest.mark.asyncio
-async def test_open_proc_does_not_hang_on_exception(open_in_proc_and_sleep_fn):
-    open_in_proc, sleep_fn = open_in_proc_and_sleep_fn
-
+async def test_open_proc_does_not_hang_on_exception(open_in_proc):
     async def do_sleep_forever():
         while True:
-            await sleep_fn(0)
+            await sleep(0)
 
     async def _do_inner():
         with pytest.raises(CustomException):

@@ -7,7 +7,6 @@ import sys
 from typing import (
     Any,
     BinaryIO,
-    Callable,
     Coroutine,
     Sequence,
     cast,
@@ -18,6 +17,10 @@ from ._utils import (
     cleanup_tasks,
     pickle_value,
     receive_pickled_value,
+)
+from .abc import (
+    TAsyncFn,
+    TEngineRunner,
 )
 from .exceptions import (
     ChildCancelled,
@@ -105,7 +108,7 @@ async def _handle_coro(coro: Coroutine[Any, Any, TReturn], got_SIGINT: asyncio.E
 
 
 async def _do_async_fn(
-    async_fn: Callable[..., Coroutine[Any, Any, TReturn]],
+    async_fn: TAsyncFn,
     args: Sequence[Any],
     to_parent: BinaryIO,
     loop: asyncio.AbstractEventLoop,
@@ -164,7 +167,28 @@ async def _do_async_fn(
             raise Exception("unreachable")
 
 
-def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
+def _run_on_asyncio(async_fn: TAsyncFn, args: Sequence[Any], to_parent: BinaryIO) -> None:
+    loop = asyncio.get_event_loop()
+    try:
+        result: Any = loop.run_until_complete(_do_async_fn(async_fn, args, to_parent, loop))
+    except BaseException:
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        # `mypy` thinks that `exc_value` and `exc_tb` are `Optional[..]` types
+        if exc_type is asyncio.CancelledError:
+            exc_value = ChildCancelled(*exc_value.args)  # type: ignore
+        remote_exc = RemoteException(exc_value, exc_tb)  # type: ignore
+        finished_payload = pickle_value(remote_exc)
+        raise
+    else:
+        finished_payload = pickle_value(result)
+    finally:
+        # XXX: The STOPPING state seems useless as nothing happens between that and the FINISHED
+        # state.
+        update_state(to_parent, State.STOPPING)
+        update_state_finished(to_parent, finished_payload)
+
+
+def run_process(runner: TEngineRunner, parent_pid: int, fd_read: int, fd_write: int) -> None:
     """
     Run the child process.
 
@@ -185,24 +209,8 @@ def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
         # state: BOOTING
         update_state(to_parent, State.BOOTING)
 
-        loop = asyncio.get_event_loop()
-
         try:
-            try:
-                result = loop.run_until_complete(
-                    _do_async_fn(async_fn, args, to_parent, loop),
-                )
-            except BaseException:
-                exc_type, exc_value, exc_tb = sys.exc_info()
-                # `mypy` thinks that `exc_value` and `exc_tb` are `Optional[..]` types
-                if exc_type is asyncio.CancelledError:
-                    exc_value = ChildCancelled(*exc_value.args)  # type: ignore
-                remote_exc = RemoteException(exc_value, exc_tb)  # type: ignore
-                finished_payload = pickle_value(remote_exc)
-                raise
-            finally:
-                # state: STOPPING
-                update_state(to_parent, State.STOPPING)
+            runner(async_fn, args, to_parent)
         except KeyboardInterrupt:
             code = 2
         except SystemExit as err:
@@ -210,11 +218,8 @@ def _run_process(parent_pid: int, fd_read: int, fd_write: int) -> None:
         except BaseException:
             code = 1
         else:
-            finished_payload = pickle_value(result)
             code = 0
         finally:
-            # state: FINISHED
-            update_state_finished(to_parent, finished_payload)
             sys.exit(code)
 
 
@@ -247,6 +252,9 @@ parser.add_argument(
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    _run_process(
-        parent_pid=args.parent_pid, fd_read=args.fd_read, fd_write=args.fd_write
+    run_process(
+        runner=_run_on_asyncio,
+        parent_pid=args.parent_pid,
+        fd_read=args.fd_read,
+        fd_write=args.fd_write,
     )

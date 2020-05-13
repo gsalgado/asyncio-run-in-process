@@ -21,5 +21,7 @@ def touch_path():
 def runner(request):
     if request.param == 'use_trio':
         return run_in_process_with_trio
-    else:
+    elif request.param == 'use_asyncio':
         return run_in_process
+    else:
+        raise Exception("Invariant")
