@@ -359,7 +359,6 @@ async def run_in_process(async_fn: Callable[..., TReturn],
 
 async def run_in_process_with_trio(async_fn: Callable[..., TReturn],
                                    *args: Any,
-                                   loop: asyncio.AbstractEventLoop = None,
                                    subprocess_kwargs: 'SubprocessKwargs' = None) -> TReturn:
     proc_ctx = open_in_process_with_trio(
         async_fn, *args, subprocess_kwargs=subprocess_kwargs)
